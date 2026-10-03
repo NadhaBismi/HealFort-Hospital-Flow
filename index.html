@@ -1,1 +1,578 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hospital Flow Twin</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#f4f6f8;--card:#fff;--tx:#14202b;--mu:#5d6b78;--ac:#0a7d6b;--bd:#d9e0e6;--red:#d93b3b}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1419;--card:#18212a;--tx:#e6edf3;--mu:#8fa0af;--ac:#2fd0b0;--bd:#2a3642;--red:#ff6b6b}}
+:root[data-theme="dark"]{--bg:#0e1419;--card:#18212a;--tx:#e6edf3;--mu:#8fa0af;--ac:#2fd0b0;--bd:#2a3642;--red:#ff6b6b}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.app{display:grid;grid-template-columns:1fr 390px;height:100%}
+#view{position:relative;min-height:300px;background:#0f1a22}
+#view canvas{display:block;width:100%;height:100%}
+.hud{position:absolute;left:10px;top:10px;display:flex;gap:8px;flex-wrap:wrap}
+.pill{background:rgba(15,26,34,.82);color:#e6edf3;border:1px solid #2a3642;border-radius:10px;padding:6px 10px;font-size:12px}
+.pill b{display:block;font-size:16px}
+#alert{position:absolute;left:10px;right:10px;bottom:10px;background:var(--red);color:#fff;border-radius:10px;padding:10px 12px;display:none;font-weight:600}
+.side{overflow:auto;padding:12px;border-left:1px solid var(--bd)}
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button{flex:1;padding:8px 2px;font-size:13px}
+button,select,textarea,input{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px}
+button{cursor:pointer}button.rec{background:#e53935!important;border-color:#e53935!important;color:#fff!important;animation:pl2 1s infinite}@keyframes pl2{50%{opacity:.7}}
+button.on,button[aria-pressed=true],button.pri{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:10px}
+.card h3{margin:0 0 8px;font-size:14px}
+textarea{width:100%;min-height:70px;box-sizing:border-box;resize:vertical}
+.row{display:flex;gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap}
+.row label{flex:1;min-width:120px;color:var(--mu)}
+.tag{display:inline-block;padding:2px 9px;border-radius:99px;color:#fff;font-weight:600;font-size:12px}
+.p1{background:#e53935}.p2{background:#f57c00}.p3{background:#c9a400}.p4{background:#2e9e5b}
+.mu{color:var(--mu);font-size:12px}
+.q{display:flex;justify-content:space-between;border-bottom:1px solid var(--bd);padding:3px 0}
+.pane{display:none}.pane.on{display:block}
+@media(max-width:820px){.app{grid-template-columns:1fr;grid-template-rows:55vh auto;height:auto;min-height:100%}.side{border-left:0}}
+</style></head><body>
+<div class="app">
+<div id="view">
+ <div class="hud">
+  <div class="pill">Avg wait<b id="sW">0 min</b></div>
+  <div class="pill">In hospital<b id="sP">0</b></div>
+  <div class="pill">Bottleneck<b id="sB">-</b></div>
+  <div class="pill">ER beds free<b id="sE">6</b></div>
+ </div>
+ <div id="alert"></div>
+</div>
+<div class="side">
+ <div class="tabs">
+  <button class="on" data-t="twin">Twin</button><button data-t="live">Live queue</button><button data-t="voice">Voice</button><button data-t="amb">Ambulance</button><button data-t="val">Validation</button><button data-t="xai" id="xtab">Rush forecast</button>
+ </div>
 
+ <div class="pane on" id="twin">
+  <div class="card"><h3>What-if controls</h3>
+   <div class="row"><label>Doctors: <b id="vD">3</b></label><input type="range" id="doc" min="1" max="8" value="3"></div>
+   <div class="row"><label>Lab staff: <b id="vL">2</b></label><input type="range" id="lab" min="1" max="5" value="2"></div>
+   <div class="row"><label>Pharmacists: <b id="vP">2</b></label><input type="range" id="pha" min="1" max="6" value="2"></div>
+   <div class="row"><label>Arrivals/hr: <b id="vA">30</b></label><input type="range" id="arr" min="5" max="120" value="30"></div>
+   <div class="row"><button id="rush">Festival rush</button><button id="calm">Normal load</button></div>
+   <div class="row"><label style="flex:0">Simulation speed</label><button data-sp="1" aria-pressed="true">1x</button><button data-sp="2" aria-pressed="false">2x</button><button data-sp="4" aria-pressed="false">4x</button><span id="spl" class="mu"></span></div>
+   <div class="mu">Drag to rotate the 3D view, scroll to zoom. Dot colour = priority.</div>
+  </div>
+  <div class="card"><h3>Queues</h3><div id="qs"></div></div>
+ </div>
+
+ <div class="pane" id="live">
+  <div class="card"><h3>Backend <span class="mu" id="bk">connecting...</span></h3>
+   <div class="row"><button class="pri" id="simBtn">▶ Start simulator</button><button id="seed">Seed 20</button><button id="reset">Reset</button></div>
+   <div class="row"><label><input type="checkbox" id="liveChk" checked> Show backend queue in 3D</label></div>
+   <div class="mu" id="drv"></div></div>
+  <div class="card"><h3>Station load</h3><div id="bars"></div></div>
+  <div class="card"><h3>Waiting list (priority order)</h3><div id="wl"></div></div>
+ </div>
+
+ <div class="pane" id="voice">
+  <div class="card"><h3>Patient speaks symptoms</h3>
+   <div class="row"><select id="lang"><option value="en-IN">English</option><option value="ml-IN">Malayalam</option><option value="hi-IN">Hindi</option><option value="ta-IN">Tamil</option></select>
+   <button id="mic1" class="pri">🎤 Speak</button></div>
+   <textarea id="t1" placeholder="Speak or type, e.g. chest pain since morning, sweating"></textarea>
+   <div class="row"><button id="ex1">Try example</button><button id="an1" class="pri">Analyze</button></div>
+   <div class="mu">Live dictation (Chrome or Edge, with microphone allowed) streams text as you speak. If the microphone is blocked inside this view, open the page in its own tab or type. AI processing runs on Claude with rule-based red-flag safety. Audio is never stored.</div>
+  </div>
+  <div class="card" id="r1" style="display:none"></div>
+ </div>
+
+ <div class="pane" id="amb">
+  <div class="card"><h3>Hospital network map <span class="mu">other hospitals: demo data</span></h3>
+   <svg id="mp" viewBox="0 0 600 360" role="img" aria-label="Map of three hospitals and the ambulance route" style="width:100%;max-height:340px;background:#12202a;border-radius:8px"></svg>
+   <div class="row"><label for="mn" style="flex:0">Machine needed</label><select id="mn" style="flex:0"><option value="">None</option><option>CT scanner</option><option>MRI</option><option>Ventilator</option><option>Defibrillator</option></select><button id="md" class="pri">Dispatch to recommended</button><button id="mu">Request urgent machine</button></div>
+   <div id="mc" class="mu" aria-live="polite"></div>
+   <h3 style="margin-top:12px">Why this hospital?</h3><div id="mr" aria-live="polite"></div></div>
+  <div class="card"><h3>Equipment availability</h3><div id="me"></div></div>
+  <div class="card"><h3>Alerts</h3><div id="ml" role="log" aria-live="polite"><span class="mu">No alerts yet.</span></div></div>
+  <div class="card"><h3>Paramedic report (en route)</h3>
+   <div class="row"><button id="mic2" class="pri">🎤 Dictate</button><label style="flex:0">ETA min</label><input id="eta" type="number" min="1" max="30" value="8" style="width:70px"></div>
+   <textarea id="t2" placeholder="58 year old male, chest pain, sweating, BP 90 over 60, SpO2 91"></textarea>
+   <div class="row"><button id="ex2">Try example</button><button id="go" class="pri">Send pre-alert &amp; dispatch</button></div>
+  </div>
+  <div class="card" id="r2" style="display:none"></div>
+ </div>
+</div>
+</div>
+
+<div class="pane" id="val">
+ <div class="card"><h3>Validation against the MIMIC-IV ED dataset</h3>
+  <div class="mu">Dataset: 222 ED visits embedded in this page (length of stay and triage acuity). Method: seeded split into 155 calibration and 67 validation records. Simulated patients are generated from the calibration data only, 30 replications, then compared with the unseen validation records.</div>
+  <div class="row"><label for="vseed">Split seed</label><input id="vseed" type="number" value="7" style="width:80px"><button id="vrun" class="pri">Run validation</button></div>
+  <div id="verr" class="mu" role="alert"></div></div>
+ <div class="card"><h3>Real vs simulated <span class="mu">computed in this browser from the dataset</span></h3><div id="vtab"></div></div>
+ <div class="card"><h3>Across 30 different splits</h3><div id="vsp" class="mu"></div></div>
+ <div class="card"><h3>LOS by acuity (validation records)</h3><div id="vac"></div></div>
+ <div class="card"><h3>What this validates</h3><div class="mu">Error is the gap between simulated and observed values as a percent of the observed value. It is not accuracy. The dataset has no department timestamps, so this checks ED-level length of stay and acuity mix only, not Triage, Lab or Radiology routes. Results change with the split seed because the validation set is small (67 records).</div></div>
+</div>
+<div class="pane" id="xai">
+ <div class="card"><h3>Explainable rush-hour forecast</h3>
+  <div class="mu">A transparent queueing model predicts waits at each station. Hourly demand comes from the dataset's arrival pattern (smoothed over 3 hours). Staff counts and arrivals/hr come from the controls on the Twin tab. Every number traces to arrivals, service time and staff, so each prediction can be explained.</div>
+  <div class="row"><label for="xh">Hour of day</label><select id="xh" style="flex:0"></select><button id="xr" class="pri">Update forecast</button></div></div>
+ <div class="card" aria-live="polite"><h3>Predicted flow</h3><div id="xo"></div></div>
+ <div class="card"><h3>Why this prediction?</h3><div id="xw"></div></div>
+ <div class="card"><h3>What would help most?</h3><div id="xl"></div></div>
+ <div class="card"><h3>Predicted wait by hour</h3><div id="xc"></div></div>
+ <div class="card"><div class="mu">Hourly arrival shape: dataset derived (222 visits, small sample). Service times, routing and staffing: prototype assumptions from this page. Output: queueing-model prediction, not a clinical or validated forecast. Department routes cannot be validated because the dataset has no department timestamps.</div></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button,.pane').forEach(e=>e.classList.remove('on'));
+  b.classList.add('on');$(b.dataset.t).classList.add('on');});
+
+/* ---------- triage engine (rule based, works offline) ---------- */
+const RULES=[
+ {r:/chest pain|heart attack|നെഞ്ച|सीने|नेनेचे|நெஞ்சு/i,d:'Cardiology',p:1,f:'Chest pain'},
+ {r:/can'?t breathe|breathless|short of breath|breathing|ശ്വാസം|ശ്വാസ|सांस|மூச்சு/i,d:'Emergency / Pulmonology',p:1,f:'Breathing difficulty'},
+ {r:/unconscious|collapsed|faint|ബോധ|बेहोश|மயக்க/i,d:'Emergency',p:1,f:'Loss of consciousness'},
+ {r:/stroke|seizure|slurred|paralys|പക്ഷാഘാത|लकवा|பக்கவாத/i,d:'Neurology',p:1,f:'Neuro red flag'},
+ {r:/heavy bleeding|bleeding heavily|vomiting blood|രക്തസ്രാവ|खून|ரத்த/i,d:'Emergency / Surgery',p:1,f:'Severe bleeding'},
+ {r:/accident|fracture|broken|burn|അപകട|दुर्घटना|விபத்து/i,d:'Trauma / Orthopedics',p:2,f:'Injury'},
+ {r:/pregnan|ഗർഭ|गर्भ|கர்ப்ப/i,d:'Obstetrics',p:2,f:'Pregnancy'},
+ {r:/high fever|severe|കഠിന|तेज़|கடுமை/i,d:'General Medicine',p:2,f:'Severe symptoms'},
+ {r:/fever|vomit|infection|cough|പനി|ചുമ|बुखार|खांसी|காய்ச்சல்|இருமல்/i,d:'General Medicine',p:3,f:'Fever / infection'},
+ {r:/pain|ache|വേദന|दर्द|வலி/i,d:'General Medicine',p:3,f:'Pain'}];
+function analyze(text){
+  let pri=4,dept='General Medicine',flags=[];
+  for(const x of RULES) if(x.r.test(text)){ if(x.p<pri){pri=x.p;dept=x.d} flags.push(x.f); }
+  const bp=text.match(/(\d{2,3})\s*(?:over|\/)\s*(\d{2,3})/);
+  if(bp&&+bp[1]<90){pri=1;flags.push('Low BP '+bp[1]+'/'+bp[2]);}
+  const sp=text.match(/(?:spo2|oxygen|saturation)\D{0,6}(\d{2,3})/i);
+  if(sp&&+sp[1]<92){pri=1;flags.push('Low SpO2 '+sp[1]+'%');}
+  const age=text.match(/(\d{1,3})\s*(?:year|yr|വയസ്|साल|வயது)/i);
+  return{pri,dept,flags:[...new Set(flags)],age:age?+age[1]:null};
+}
+let SM=null;
+(async()=>{try{if(window.claude)SM=await claude.use('sample')}catch(e){}})();
+/* Real AI processing (Claude via sample). Rule-based red flags can only escalate, never downgrade. */
+async function triage(text,lang){
+  const base=analyze(text);base.src='rules';
+  if(!SM)return base;
+  try{
+    const j=await SM.json('You are a hospital triage assistant (decision support only; a nurse decides). The text may be in '+lang+' and may contain speech-recognition errors. Return ONLY JSON: {"english":"English translation","summary":"one-line clinical summary","priority":1-4 (1=emergency, 2=urgent, 3=moderate, 4=routine),"department":"best department","flags":["red flags"],"age":number or null,"followup":"one short question to ask next"}.\nText: '+text,{modelTier:'quick'});
+    const ai=+j.priority||4,pri=Math.min(ai,base.pri);
+    return{pri,dept:base.pri<ai?base.dept:(j.department||base.dept),flags:[...new Set([...(j.flags||[]),...base.flags])],age:j.age??base.age,english:j.english,summary:j.summary,followup:j.followup,src:'ai'};
+  }catch(e){return base}
+}
+const PL={1:'Emergency',2:'Urgent',3:'Moderate',4:'Routine'};
+const tag=p=>`<span class="tag p${p}">P${p} ${PL[p]}</span>`;
+
+/* ---------- speech ---------- */
+let rec=null;
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition,EMB=window.self!==window.top;
+function vmsg(btn,t){let e=btn.parentNode.querySelector('.vs');if(!e){e=document.createElement('div');e.className='vs mu';e.style.flexBasis='100%';e.setAttribute('role','status');e.setAttribute('aria-live','polite');btn.parentNode.appendChild(e)}e.textContent=t||''}
+function listen(btn,lang,box,retry){
+  if(!SR){vmsg(btn,'Voice input needs Chrome or Edge. Please type instead.');banner('Voice input needs Chrome or Edge. Please type instead.');return}
+  if(rec&&!retry){try{rec.stop()}catch(e){rec=null}return}
+  btn.dataset.l=btn.dataset.l||btn.textContent;
+  const r=rec=new SR();r.lang=lang;r.interimResults=true;r.maxAlternatives=1;r.continuous=!/Android/i.test(navigator.userAgent);
+  const base=retry?retry.base:(box.value?box.value.trim()+' ':'');let fin=retry?retry.fin:'',err='';
+  r.onstart=()=>{btn.classList.add('rec');btn.textContent='Stop (listening)';vmsg(btn,'Listening... speak now')};
+  r.onresult=e=>{let it='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)fin+=t+' ';else it+=t}box.value=(base+fin+it).trim();vmsg(btn,'Listening... speak naturally')};
+  r.onerror=e=>{err=e.error;
+    if(e.error==='language-not-supported'&&lang!=='en-IN'){vmsg(btn,'This browser cannot recognise that language. Switching to English.');rec=null;listen(btn,'en-IN',box,{base,fin});return}
+    const m={'not-allowed':EMB?'The microphone is blocked inside this embedded view. Allow it in the browser address bar, or open the page in its own browser tab. You can still type.':'Microphone permission was denied. Click the lock icon in the address bar, allow the microphone, then try again.','service-not-allowed':'Speech service is blocked in this view. Open the page in its own tab, or type instead.','no-speech':'No speech heard. Check your microphone and try again.','audio-capture':'No microphone found.','network':'Speech service unreachable. Check your internet connection.','aborted':''};
+    vmsg(btn,m[e.error]!==undefined?m[e.error]:'Voice error: '+e.error);if(m[e.error])banner(m[e.error])};
+  r.onend=()=>{if(rec!==r)return;btn.classList.remove('rec');btn.textContent=btn.dataset.l;rec=null;if(!err)vmsg(btn,box.value.trim()?'Done. Press Analyze to continue.':'Nothing was captured. Try again or type.')};
+  try{r.start()}catch(e){rec=null;btn.classList.remove('rec');btn.textContent=btn.dataset.l;vmsg(btn,'Could not start the microphone. Try again.')}
+}
+$('mic1').onclick=()=>listen($('mic1'),$('lang').value,$('t1'));
+$('mic2').onclick=()=>listen($('mic2'),'en-IN',$('t2'));
+$('ex1').onclick=()=>{$('t1').value=$('lang').value==='ml-IN'?'എനിക്ക് രാവിലെ മുതൽ നെഞ്ചുവേദന ഉണ്ട്':$('lang').value==='hi-IN'?'मुझे सुबह से सीने में दर्द है':'I have had chest pain since morning'};
+$('ex2').onclick=()=>{$('t2').value='58 year old male, chest pain, sweating, BP 90 over 60, SpO2 91'};
+
+/* ---------- voice triage UI ---------- */
+let cur=null;
+$('an1').onclick=async()=>{
+  const t=$('t1').value.trim();if(!t)return;
+  const r=$('r1');r.style.display='block';r.innerHTML='<div class="mu">Processing with AI...</div>';
+  cur=await triage(t,$('lang').selectedOptions[0].text);
+  const row=(k,v)=>v?`<div class="q"><span>${k}</span><span style="text-align:right;max-width:70%">${esc(String(v))}</span></div>`:'';
+  r.innerHTML=`<h3>Structured case <span class="mu">(${cur.src==='ai'?'AI + safety rules':'rules only'})</span></h3><div class="q"><span>Heard</span><span style="text-align:right;max-width:70%">${esc(t)}</span></div>
+  ${row('English',cur.english)}${row('Summary',cur.summary)}${row('Ask next',cur.followup)}
+  <div class="q"><span>Priority</span><span id="ptag">${tag(cur.pri)}</span></div>
+  <div class="q"><span>Department</span><b>${cur.dept}</b></div>
+  <div class="q"><span>Red flags</span><span>${cur.flags.join(', ')||'none detected'}</span></div>
+  <div class="row"><label>Nurse override</label><select id="ov"><option value="1">P1 Emergency</option><option value="2">P2 Urgent</option><option value="3">P3 Moderate</option><option value="4">P4 Routine</option></select></div>
+  <div class="row"><button class="pri" id="cf">Confirm &amp; join queue</button></div>
+  <div class="mu">Decision support only. A nurse makes the final call.</div>`;
+  $('ov').value=cur.pri;
+  $('ov').onchange=()=>{cur.pri=+$('ov').value;$('ptag').innerHTML=tag(cur.pri)};
+  $('cf').onclick=()=>{enqueue(cur.pri,'voice','Voice patient');$('cf').textContent='Added to queue ✓';
+    if(cur.pri===1)banner('P1 patient at entrance: '+cur.dept+' alerted, ER staff to meet patient.')};
+};
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ---------- ambulance UI ---------- */
+let amb=null,reserved=0;
+$('go').onclick=async()=>{
+  const t=$('t2').value.trim();if(!t||amb)return;
+  const g=$('go');g.disabled=true;g.textContent='Processing...';
+  const a=await triage(t,'English');a.pri=Math.min(a.pri,2);
+  g.disabled=false;g.textContent='Send pre-alert & dispatch';if(amb)return;
+  const eta=Math.max(1,+$('eta').value||8);
+  const team=a.dept.split(' / ')[0]+' team';
+  reserved++;amb={t0:simMin,eta,pri:a.pri};
+  $('r2').style.display='block';
+  $('r2').innerHTML=`<h3>ER pre-arrival board</h3><div class="q"><span>Case</span><span>${tag(a.pri)}</span></div>
+  <div class="q"><span>Suspected</span><b>${a.dept}</b></div>
+  <div class="q"><span>Flags</span><span>${a.flags.join(', ')||'-'}</span></div>
+  ${a.summary?`<div class="q"><span>Summary</span><span style="text-align:right;max-width:70%">${esc(a.summary)}</span></div>`:''}
+  <div class="q"><span>Team alerted</span><span>${team}</span></div>
+  <div class="q"><span>Bed</span><span>Resus Bed ${S[4].sv+reserved} reserved, use Entrance B</span></div>
+  <div class="q"><span>ETA</span><b id="cd">${eta}:00</b></div>`;
+  banner('INBOUND AMBULANCE: '+a.dept+' | '+a.flags.join(', '));
+};
+
+/* ---------- 3D scene ---------- */
+const S=[
+ {n:'Triage',x:-9,z:0,sv:2,t:2.5,c:0x4aa3ff},
+ {n:'Lab',x:-2,z:-7,sv:2,t:6,c:0xb08cff},
+ {n:'Radiology',x:-2,z:7,sv:1,t:8,c:0xffb84a},
+ {n:'Doctor',x:6,z:0,sv:3,t:5,c:0x3ddc97},
+ {n:'ER',x:12,z:-7,sv:2,t:12,c:0xff5a5a},
+ {n:'Pharmacy',x:12,z:7,sv:2,t:4,c:0xf06292}];
+S.forEach(s=>{s.q=[];s.run=[];s.w=[]});
+const view=$('view');
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x0f1a22);
+const cam=new THREE.PerspectiveCamera(50,1,.1,200);
+const ren=new THREE.WebGLRenderer({antialias:true});view.appendChild(ren.domElement);
+scene.add(new THREE.AmbientLight(0xffffff,.65));
+const dl=new THREE.DirectionalLight(0xffffff,.8);dl.position.set(10,25,12);scene.add(dl);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(40,28),new THREE.MeshLambertMaterial({color:0x1b2a35}));
+floor.rotation.x=-Math.PI/2;scene.add(floor);
+scene.add(new THREE.GridHelper(40,20,0x2f4352,0x24343f));
+const road=new THREE.Mesh(new THREE.PlaneGeometry(40,2),new THREE.MeshLambertMaterial({color:0x333c44}));
+road.rotation.x=-Math.PI/2;road.position.set(0,.02,-12);scene.add(road);
+function label(txt,col){const c=document.createElement('canvas');c.width=256;c.height=64;const g=c.getContext('2d');
+ g.fillStyle='#fff';g.font='bold 34px system-ui';g.textAlign='center';g.fillText(txt,128,44);
+ const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c)}));sp.scale.set(5,1.25,1);sp.cv=c;return sp}
+function setLabel(sp,t){const c=sp.cv,g=c.getContext('2d');g.clearRect(0,0,256,64);g.fillStyle='#fff';g.font='bold 25px system-ui';g.textAlign='center';g.fillText(t,128,44);sp.material.map.needsUpdate=true}
+const SKIN=new THREE.MeshLambertMaterial({color:0xf1c7a0}),LEGM=new THREE.MeshLambertMaterial({color:0x2b3a47});
+const G_T=new THREE.BoxGeometry(.3,.34,.17),G_H=new THREE.SphereGeometry(.12,10,10),G_L=new THREE.BoxGeometry(.09,.3,.09),G_A=new THREE.BoxGeometry(.07,.28,.07);
+function person(mat){const g=new THREE.Group(),a=(geo,m,x,y)=>{const o=new THREE.Mesh(geo,m);o.position.set(x,y,0);g.add(o);return o};
+ a(G_T,mat,0,.1);a(G_H,SKIN,0,.38);g.legs=[a(G_L,LEGM,-.08,-.17),a(G_L,LEGM,.08,-.17)];g.arms=[a(G_A,mat,-.2,.1),a(G_A,mat,.2,.1)];g.material=mat;return g}
+const BG=new THREE.BoxGeometry(1.4,.5,1.4);
+function srvPos(s,j){return[s.x-.85+(j%4)*1.7,s.z-.85+Math.floor(j/4)*1.7]}
+function build(s){(s.blocks||[]).forEach(b=>scene.remove(b));s.blocks=[];
+ for(let j=0;j<s.sv;j++){const m=new THREE.Mesh(BG,new THREE.MeshLambertMaterial({color:s.c}));const [x,z]=srvPos(s,j);m.position.set(x,.25,z);const sf=person(m.material);sf.scale.set(1.5,1.5,1.5);sf.position.set(0,.73,-.4);m.add(sf);scene.add(m);s.blocks.push(m)}
+ if(s.lb)scene.remove(s.lb);s.lb=label(s.n+' x'+s.sv);s.lb.position.set(s.x-.85+(Math.min(s.sv,4)-1)*.85,2.2,s.z);scene.add(s.lb)}
+function setSv(i,n){S[i].sv=n;build(S[i])}
+S.forEach(build);
+S.forEach(s=>{s.ring=new THREE.Mesh(new THREE.CircleGeometry(3.4,40),new THREE.MeshBasicMaterial({color:0x2ecc71,transparent:true,opacity:.18}));s.ring.rotation.x=-Math.PI/2;s.ring.position.set(s.x+1,.03,s.z);scene.add(s.ring)});
+const pg=new THREE.SphereGeometry(.28,12,12);
+const PC={1:0xff3b3b,2:0xff9800,3:0xffd23f,4:0x3ddc7a};
+const ambM=new THREE.Group();
+ambM.add(new THREE.Mesh(new THREE.BoxGeometry(2.4,1.1,1.1),new THREE.MeshLambertMaterial({color:0xffffff})));
+const stripe=new THREE.Mesh(new THREE.BoxGeometry(2.42,.25,1.12),new THREE.MeshLambertMaterial({color:0xe53935}));stripe.position.y=.1;ambM.add(stripe);
+const beacon=new THREE.PointLight(0xff0000,0,12);beacon.position.y=1.2;ambM.add(beacon);
+ambM.position.set(-18,.7,-12);ambM.visible=false;scene.add(ambM);
+
+/* orbit camera */
+let th=-.6,ph=.95,rad=34;
+function setCam(){cam.position.set(rad*Math.sin(ph)*Math.sin(th),rad*Math.cos(ph),rad*Math.sin(ph)*Math.cos(th));cam.lookAt(0,0,0)}
+let drag=null;
+ren.domElement.addEventListener('pointerdown',e=>{drag=[e.clientX,e.clientY]});
+addEventListener('pointerup',()=>drag=null);
+addEventListener('pointermove',e=>{if(!drag)return;th-=(e.clientX-drag[0])*.006;ph=Math.min(1.45,Math.max(.25,ph-(e.clientY-drag[1])*.006));drag=[e.clientX,e.clientY];setCam()});
+ren.domElement.addEventListener('wheel',e=>{e.preventDefault();rad=Math.min(60,Math.max(14,rad+e.deltaY*.03));setCam()},{passive:false});
+function fit(){const w=view.clientWidth,h=view.clientHeight;ren.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix()}
+new ResizeObserver(fit).observe(view);fit();setCam();
+
+/* ---------- simulation ---------- */
+let spd=1;let simMin=0,P=[],last=performance.now(),acc=0,rate=30;
+function spawn(pri,front){
+  pri=pri||(()=>{const r=Math.random();return r<.05?1:r<.2?2:r<.55?3:4})();
+  const m=person(new THREE.MeshLambertMaterial({color:PC[pri]}));
+  m.position.set(-17,.3,11);m.scale.setScalar(1.35);scene.add(m);
+  let route=pri===1?[4]:[0];
+  if(pri!==1){const r=Math.random();if(r<.35)route.push(1);else if(r<.6)route.push(2);route.push(3);if(Math.random()<.4)route.push(5)}
+  const p={m,pri,route,i:0,st:'move',tx:0,tz:0};P.push(p);aim(p);return p;
+}
+function slot(s,i){return[s.x-2.4-.6*(i%7),s.z+.7*Math.floor(i/7)-.5]}
+function aim(p){const s=S[p.route[p.i]];[p.tx,p.tz]=slot(s,s.q.length)}
+function step(dtMin){
+  simMin+=dtMin;
+  acc+=dtMin*rate/60;while(acc>=1){acc--;spawn()}
+  S.forEach((s,si)=>{
+    for(const p of s.run.slice()) if(simMin>=p.done){
+      s.run.splice(s.run.indexOf(p),1);p.i++;p.ty=.3;
+      if(p.i>=p.route.length){p.st='exit';p.tx=17;p.tz=11}else{p.st='move';aim(p)}
+    }
+    while(s.run.length<s.sv&&s.q.length){
+      s.q.sort((a,b)=>a.pri-b.pri||a.qt-b.qt);
+      const p=s.q.shift();s.w.push(simMin-p.qt);if(s.w.length>40)s.w.shift();
+      p.st='svc';p.done=simMin+s.t*(.6+Math.random()*.8);let j=0;while(s.run.some(r=>r.srv===j))j++;p.srv=j;s.run.push(p);
+      [p.tx,p.tz]=srvPos(s,j);p.ty=.85;
+    }
+  });
+}
+function frame(now){
+  const dt=Math.min(.1,(now-last)/1000);last=now;
+  if(live)simMin+=dt*2*spd;else step(dt*2*spd);
+  for(let k=P.length-1;k>=0;k--){
+    const p=P[k],pos=p.m.position;
+    if(p.st==='queue'){const s=S[p.route[p.i]];[p.tx,p.tz]=slot(s,s.q.indexOf(p))}
+    const dx=p.tx-pos.x,dz=p.tz-pos.z,d=Math.hypot(dx,dz),sp=(p.st==='exit'?9:7)*dt*spd;
+    if(d>.05){const f=Math.min(1,sp/d);pos.x+=dx*f;pos.z+=dz*f}
+    const mv=d>.1&&(p.st==='move'||p.st==='exit'),sw=mv?Math.sin(now*Math.min(spd,2)/80+k*2)*.7:0;
+    if(p.m.legs){p.m.legs[0].rotation.x=sw;p.m.legs[1].rotation.x=-sw;p.m.arms[0].rotation.x=-sw;p.m.arms[1].rotation.x=sw}
+    if(mv)p.m.rotation.y=Math.atan2(dx,dz);
+    pos.y+=((p.ty||.3)-pos.y)*Math.min(1,dt*10);
+    if(p.st==='move'&&d<.3){p.st='queue';p.qt=simMin;S[p.route[p.i]].q.push(p)}
+    if(p.st==='exit'&&d<.4){scene.remove(p.m);P.splice(k,1)}
+  }
+  S.forEach(s=>s.blocks.forEach((b,j)=>{const on=live?(s.busyN||0)>j:s.run.some(r=>r.srv===j);b.material.color.setHex(s.c);const sf=b.children[0];if(sf){sf.position.y=.73+(on?Math.abs(Math.sin(now/180+j))*.1:0);sf.rotation.y=on?Math.sin(now/400+j)*.3:0}if(!on)b.material.color.multiplyScalar(.4)}));
+  S.forEach(s=>{const r=s.q.length/(s.sv*3);s.ring.material.color.setHex(r<.34?0x2ecc71:r<.8?0xf5a623:0xe53935);s.ring.material.opacity=.16+(r>=.8?.1*Math.sin(now/250):0)});
+  /* ambulance */
+  if(amb){
+    const pr=(simMin-amb.t0)/amb.eta;ambM.visible=true;
+    ambM.position.x=-18+Math.min(pr,1)*30;ambM.position.z=-12+Math.min(pr,1)*5;
+    beacon.intensity=Math.sin(now/90)>0?3:0;
+    const left=Math.max(0,(amb.eta-(simMin-amb.t0)));const cd=$('cd');
+    if(cd)cd.textContent=Math.floor(left)+':'+String(Math.floor(left%1*60)).padStart(2,'0');
+    if(pr>=1){
+      if(live)enqueue(1,'ambulance','Ambulance case');else{const p=spawn(1);p.route=[4];p.i=0;p.m.position.set(S[4].x-3,.3,S[4].z+2);aim(p);}
+      amb=null;reserved=Math.max(0,reserved-1);ambM.visible=false;beacon.intensity=0;
+      if(cd)cd.textContent='ARRIVED';banner('Ambulance arrived. ER team and bed were ready.');
+    }
+  }
+  ren.render(scene,cam);requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---------- stats & controls ---------- */
+setInterval(()=>{
+  if(live){liveStats();return}
+  const all=S.flatMap(s=>s.w);
+  $('sW').textContent=(all.length?Math.round(all.reduce((a,b)=>a+b,0)/all.length*3):0)+' min';
+  $('sP').textContent=P.length;
+  let b=S[0],bs=-1;S.forEach(s=>{const v=s.q.length/s.sv;if(v>bs){bs=v;b=s}});
+  $('sB').textContent=bs>.5?b.n:'none';
+  $('sE').textContent=Math.max(0,6-S[4].run.length-S[4].q.length-reserved);
+  $('qs').innerHTML=S.map(s=>`<div class="q"><span>${s.n} <span class="mu">(${s.sv} staff)</span></span><b>${s.q.length} waiting</b></div>`).join('');
+},500);
+$('doc').oninput=e=>{setSv(3,+e.target.value);$('vD').textContent=e.target.value};
+$('pha').oninput=e=>{setSv(5,+e.target.value);$('vP').textContent=e.target.value};
+$('lab').oninput=e=>{setSv(1,+e.target.value);$('vL').textContent=e.target.value};
+function setRate(v){rate=v;$('arr').value=v;$('vA').textContent=v}
+$('arr').oninput=e=>setRate(+e.target.value);
+$('rush').onclick=()=>setRate(90);$('calm').onclick=()=>setRate(30);
+let bt;function banner(t){const a=$('alert');a.textContent=t;a.style.display='block';clearTimeout(bt);bt=setTimeout(()=>a.style.display='none',6000)}
+
+/* ================= BACKEND LAYER (shared DB with in-memory fallback) ================= */
+const NM=['Anil','Priya','Joseph','Fatima','Ravi','Meera','Suresh','Anitha','Thomas','Latha'];
+let seq=Math.floor(Math.random()*400),T=[],live=true,db=null,store=null,running=false,lease=false,tk=0,acc2=0,backoff=0,ops=[];
+const HID=Math.random().toString(36).slice(2),hold=new Map(),LP=new Map();
+const Mem=(()=>{let a=[],cbs=[],n=0;const emit=()=>cbs.forEach(f=>f(a));
+ return{kind:'In-memory (this tab only)',add:async d=>{a.push({id:'m'+(++n),...d});emit()},
+  update:async(id,d)=>{const x=a.find(t=>t.id===id);if(x)Object.assign(x,d);emit()},
+  del:async id=>{a=a.filter(t=>t.id!==id);emit()},sub:f=>{cbs.push(f);f(a)}}})();
+function dbStore(d){const c=d.collection('queue');return{kind:'Shared database (live sync across viewers)',
+ add:x=>c.add(x),update:(id,x)=>c.doc(id).update(x),del:id=>c.doc(id).delete(),
+ sub:f=>c.orderBy('createdAt','desc').limit(150).onSnapshot(sn=>f(sn.docs.map(x=>({id:x.id,...x.data()}))),e=>banner('DB: '+e.message))}}
+function mkTicket(pri,src,name){const route=pri===1?[4]:[0];
+ if(pri!==1){const r=Math.random();if(r<.35)route.push(1);else if(r<.6)route.push(2);route.push(3);if(Math.random()<.4)route.push(5)}
+ const n=Date.now();return{token:'T'+String(++seq%1000).padStart(3,'0'),name:name||NM[Math.random()*NM.length|0],pri,route,i:0,status:'waiting',createdAt:n,queuedAt:n,waitMs:0,src}}
+function enqueue(pri,src,name){if(!live){spawn(pri,true);return}const t=mkTicket(pri,src,name);ops.push(()=>store.add(t))}
+async function initBackend(){
+ try{if(window.claude)db=await claude.use('db')}catch(e){}
+ store=db?dbStore(db):Mem;$('bk').textContent=store.kind;
+ store.sub(a=>{T=a;syncLive()});
+ if(!db)startSim();
+}
+setTimeout(initBackend,200);
+/* write queue: throttled, backs off if the database rate-limits us */
+setInterval(()=>{
+ if(!store)return;if(backoff>0){backoff--;return}
+ for(const f of ops.splice(0,4)){try{Promise.resolve(f()).catch(e=>{if(e&&e.code==='resource_exhausted')backoff=6;else banner('Write failed: '+(e&&e.message))})}catch(e){}}
+},500);
+
+/* ================= SIMULATOR (one driver at a time via a DB lease) ================= */
+function startSim(){running=true;$('simBtn').textContent='■ Stop simulator'}
+$('simBtn').onclick=()=>{if(running){running=false;$('simBtn').textContent='▶ Start simulator'}else startSim()};
+$('seed').onclick=()=>{for(let k=0;k<20;k++){const r=Math.random();ops.push(()=>store.add(mkTicket(r<.1?1:r<.3?2:r<.65?3:4,'seed')))}};
+$('reset').onclick=()=>{T.forEach(t=>{const id=t.id;ops.push(()=>store.del(id))});T=[];syncLive()};
+$('liveChk').onchange=e=>{live=e.target.checked;
+ P.forEach(p=>{p.st='exit';p.tx=17;p.tz=11});LP.clear();S.forEach(s=>{s.q=[];s.run=[]});if(live)syncLive()};
+$('wl').onclick=e=>{const id=e.target.dataset.e;if(!id)return;const t=T.find(x=>x.id===id);if(t)t.pri=1;ops.push(()=>store.update(id,{pri:1}));syncLive()};
+setInterval(async()=>{
+ if(!running||!live||!store||backoff>0)return;
+ tk++;
+ if(db&&tk%3===1){try{lease=(await db.doc('meta/driver').acquire({holder:HID,ttlMs:8000})).acquired}catch(e){lease=false}}
+ $('drv').textContent=!db?'Simulation running in this tab.':lease?'This tab is driving the simulation.':'Another viewer is driving the simulation (or you have read-only access).';
+ if(db&&!lease)return;
+ const now=Date.now(),busy=S.map(()=>0),ok=t=>!(hold.get(t.id)>now);
+ const op=(t,d)=>{Object.assign(t,d);hold.set(t.id,now+2000);ops.push(()=>store.update(t.id,d))};
+ T.filter(t=>t.status==='serving').forEach(t=>{
+  if(!ok(t)){busy[t.route[t.i]]++;return}
+  if(now>=t.doneAt)op(t,t.i+1>=t.route.length?{status:'done',doneAt:now}:{i:t.i+1,status:'waiting',queuedAt:now});
+  else busy[t.route[t.i]]++;
+ });
+ S.forEach((s,si)=>{
+  const q=T.filter(t=>t.status==='waiting'&&t.route[t.i]===si&&ok(t)).sort((a,b)=>a.pri-b.pri||a.queuedAt-b.queuedAt);
+  while(busy[si]<s.sv&&q.length){const t=q.shift();busy[si]++;
+   op(t,{status:'serving',startedAt:now,doneAt:now+s.t*2000*(.6+Math.random()*.8)/spd,waitMs:(t.waitMs||0)+(now-t.queuedAt)*spd})}
+ });
+ acc2+=rate/120*spd;
+ while(acc2>=1&&ops.length<20){acc2--;const r=Math.random();ops.push(()=>store.add(mkTicket(r<.05?1:r<.2?2:r<.55?3:4,'sim')))}
+ const dn=T.filter(t=>t.status==='done').sort((a,b)=>a.doneAt-b.doneAt);
+ dn.slice(0,Math.max(0,dn.length-40)).forEach(t=>{ops.push(()=>store.del(t.id));T=T.filter(x=>x!==t)});
+ syncLive();
+},1000);
+
+/* ================= 3D <-> BACKEND SYNC ================= */
+function syncLive(){
+ if(!live)return;
+ const byS=S.map(()=>[]),run=S.map(()=>0),idx={};
+ T.filter(t=>t.status==='waiting').forEach(t=>byS[t.route[t.i]].push(t));
+ byS.forEach(a=>{a.sort((x,y)=>x.pri-y.pri||x.queuedAt-y.queuedAt);a.forEach((t,k)=>idx[t.id]=k)});
+ const ids=new Set(T.map(t=>t.id));
+ for(const t of T){
+  let p=LP.get(t.id);
+  if(t.status==='done'&&!p)continue;
+  if(!p){
+   const m=person(new THREE.MeshLambertMaterial({color:PC[t.pri]}));
+   if(t.src==='ambulance')m.position.set(S[4].x-3,.3,S[4].z+3);else m.position.set(-17,.3,11);
+   scene.add(m);p={m,st:'live',tx:0,tz:0};LP.set(t.id,p);P.push(p);
+  }
+  p.m.material.color.setHex(PC[t.pri]);
+  const si=t.route[t.i],s=S[si];
+  if(t.status==='waiting'){[p.tx,p.tz]=slot(s,idx[t.id]);p.ty=.3}
+  else if(t.status==='serving'){[p.tx,p.tz]=srvPos(s,Math.min(run[si]++,s.sv-1));p.ty=.85}
+  else{p.st='exit';p.tx=17;p.tz=11;LP.delete(t.id)}
+ }
+ for(const [id,p] of LP)if(!ids.has(id)){p.st='exit';p.tx=17;p.tz=11;LP.delete(id)}
+ S.forEach((s,i)=>s.busyN=run[i]);
+}
+function liveStats(){
+ const dn=T.filter(t=>t.status==='done').slice(0,40);
+ const w=dn.length?dn.reduce((a,t)=>a+(t.waitMs||0),0)/dn.length/1000*.5:0;
+ const wc=S.map((s,i)=>T.filter(t=>t.status==='waiting'&&t.route[t.i]===i).length);
+ const sc=S.map((s,i)=>T.filter(t=>t.status==='serving'&&t.route[t.i]===i).length);
+ let b=0,bs=-1;S.forEach((s,i)=>{const v=wc[i]/s.sv;if(v>bs){bs=v;b=i}});
+ $('sW').textContent=Math.round(w)+' min';$('sP').textContent=T.filter(t=>t.status!=='done').length;
+ $('sB').textContent=bs>.5?S[b].n:'none';$('sE').textContent=Math.max(0,6-sc[4]-wc[4]-reserved);
+ $('qs').innerHTML=S.map((s,i)=>`<div class="q"><span>${s.n} <span class="mu">(${s.sv} staff)</span></span><b>${wc[i]} waiting</b></div>`).join('');
+ $('bars').innerHTML=S.map((s,i)=>{const pc=Math.min(100,wc[i]/(s.sv*4)*100);
+  return`<div class="mu">${s.n}: ${wc[i]} waiting, ${sc[i]}/${s.sv} serving</div><div style="height:8px;border-radius:4px;background:var(--bd);margin:2px 0 6px"><div style="height:8px;border-radius:4px;width:${pc}%;background:${pc>75?'#e53935':pc>40?'#f57c00':'#2e9e5b'}"></div></div>`}).join('');
+ const now=Date.now();
+ $('wl').innerHTML=T.filter(t=>t.status==='waiting').sort((a,b)=>a.pri-b.pri||a.queuedAt-b.queuedAt).slice(0,12).map(t=>
+  `<div class="q"><span>${t.token} ${esc(t.name||'')} ${tag(t.pri)}</span><span>${S[t.route[t.i]].n} · ${Math.round((now-t.queuedAt)/1000*.5*spd)}m ${t.pri>1?`<button data-e="${t.id}" style="padding:1px 6px">↑P1</button>`:''}</span></div>`).join('')||'<div class="mu">Queue is empty. Press Start simulator.</div>';
+}
+</script><script>
+const DATA=[[264,1],[345,2],[418,2],[219,1],[103,2],[188,2],[4,0],[108,3],[244,3],[466,3],[114,3],[244,1],[350,3],[1376,3],[319,3],[205,3],[168,2],[97,0],[323,0],[330,2],[607,2],[268,2],[273,1],[187,2],[177,0],[341,2],[474,3],[520,1],[461,3],[454,3],[696,2],[412,3],[108,3],[586,3],[1566,2],[353,3],[426,3],[333,1],[253,3],[486,2],[810,2],[337,3],[286,3],[333,2],[156,2],[398,3],[416,3],[1240,3],[346,2],[864,3],[134,2],[337,3],[254,2],[338,1],[203,3],[317,2],[539,3],[338,3],[300,3],[405,2],[648,0],[580,4],[299,3],[517,2],[293,2],[180,2],[154,2],[303,2],[523,3],[402,3],[207,2],[518,3],[89,1],[654,2],[362,2],[364,3],[1125,2],[423,3],[386,2],[421,4],[345,3],[108,2],[304,3],[331,3],[248,2],[381,2],[797,3],[1292,2],[296,3],[527,3],[225,3],[188,3],[226,3],[261,3],[542,2],[533,3],[306,1],[569,0],[219,2],[158,2],[256,1],[187,2],[1068,2],[465,3],[4460,3],[582,3],[217,2],[651,2],[2826,2],[1200,2],[471,3],[323,3],[389,2],[168,0],[401,2],[142,3],[261,2],[201,0],[229,3],[1515,3],[327,2],[203,2],[292,0],[379,2],[429,3],[145,2],[334,2],[651,2],[1424,2],[658,3],[301,2],[294,1],[388,0],[395,2],[132,2],[358,2],[204,1],[76,1],[693,2],[1051,3],[857,2],[873,3],[603,3],[534,3],[639,3],[199,2],[1010,2],[424,3],[424,3],[125,0],[72,0],[408,3],[362,3],[370,2],[1025,2],[1009,2],[299,3],[173,3],[396,3],[399,3],[1861,2],[259,3],[395,3],[260,1],[655,2],[281,1],[665,2],[452,2],[808,2],[546,2],[891,2],[458,3],[528,3],[461,3],[448,3],[339,3],[324,2],[629,2],[410,2],[303,3],[1247,2],[221,2],[134,3],[475,2],[490,2],[1115,2],[276,2],[887,3],[297,2],[476,3],[1239,3],[351,2],[949,3],[126,2],[449,3],[287,2],[321,2],[220,0],[344,2],[1132,3],[4343,3],[608,2],[221,2],[64,3],[390,1],[403,2],[1044,2],[323,2],[308,2],[180,2],[219,2],[378,3],[518,2],[310,3],[238,0],[340,3],[78,1],[298,3],[312,2],[226,1],[384,3],[185,0]];
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const pct=(a,p)=>{const s=[...a].sort((x,y)=>x-y),i=(s.length-1)*p,l=Math.floor(i);return s[l]+(s[Math.ceil(i)]-s[l])*(i-l)};
+const mean=a=>a.reduce((x,y)=>x+y,0)/a.length,med=a=>pct(a,.5),m4=a=>a.filter(x=>x>240).length/a.length*100;
+const AL={0:'Not recorded',1:'P1',2:'P2',3:'P3',4:'P4'};
+function validate(seed){const r=rng(seed),ix=DATA.map((_,i)=>i);
+ for(let i=ix.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[ix[i],ix[j]]=[ix[j],ix[i]]}
+ const cal=ix.slice(0,155).map(i=>DATA[i]),val=ix.slice(155).map(i=>DATA[i]),by={};
+ cal.forEach(([l,a])=>(by[a]=by[a]||[]).push(l));
+ const real=val.map(v=>v[0]),M=[[],[],[],[]],sb={};
+ for(let k=0;k<30;k++){const sim=[];for(let n=0;n<val.length;n++){const a=cal[Math.floor(r()*cal.length)][1],p=by[a],l=p[Math.floor(r()*p.length)]*(.9+.2*r());sim.push(l);(sb[a]=sb[a]||[]).push(l)}
+  M[0].push(mean(sim));M[1].push(med(sim));M[2].push(pct(sim,.95));M[3].push(m4(sim))}
+ const ac={};val.forEach(([l,a])=>(ac[a]=ac[a]||[]).push(l));
+ return{real:[mean(real),med(real),pct(real,.95),m4(real)],sim:M.map(mean),ac,sb,n:[cal.length,val.length]}}
+function runVal(){try{const sd=+$('vseed').value;if(!Number.isFinite(sd)){$('verr').textContent='Enter a number for the split seed.';return}$('verr').textContent='';
+ const v=validate(sd),N=['Mean LOS (min)','Median LOS (min)','P95 LOS (min)','Stays over 4 h (%)'];
+ $('vtab').innerHTML=`<div class="mu">${v.n[0]} calibration records, ${v.n[1]} validation records, 30 replications. Validated against held-out observations.</div>`+N.map((n,i)=>{const e=Math.abs(v.sim[i]-v.real[i])/v.real[i]*100,mx=Math.max(v.real[i],v.sim[i]);
+  return`<div style="margin:10px 0"><b>${n}</b>: error ${e.toFixed(2)}%<div class="mu">Real ${v.real[i].toFixed(1)} | Simulated ${v.sim[i].toFixed(1)}</div>
+  <div style="height:8px;margin:2px 0;background:#2e9e5b;width:${v.real[i]/mx*100}%" aria-label="real"></div><div style="height:8px;background:var(--ac);width:${v.sim[i]/mx*100}%" aria-label="simulated"></div></div>`}).join('')+'<div class="mu">Green bar: real. Teal bar: simulated.</div>';
+ $('vac').innerHTML=Object.keys(v.ac).sort().map(a=>{const rm=med(v.ac[a]),sm=v.sb[a]?med(v.sb[a]):null;return`<div class="q"><span>${AL[a]} (${v.ac[a].length} records)</span><span>real ${Math.round(rm)} min | simulated ${sm==null?'no calibration data':Math.round(sm)+' min'}</span></div>`}).join('')+'<div class="mu">Groups with few records, such as P4, are unreliable.</div>'}
+ catch(e){$('verr').textContent='Validation could not run. Reload the page and try again.'}}
+function spread(){try{const E=[[],[],[],[]];for(let k=1;k<=30;k++){const v=validate(k);v.sim.forEach((x,i)=>E[i].push(Math.abs(x-v.real[i])/v.real[i]*100))}
+ const N=['Mean LOS','Median LOS','P95 LOS','Stays over 4 h'];$('vsp').innerHTML='Error percent over splits with seeds 1 to 30 (typical, then lowest to highest):'+E.map((a,i)=>`<div class="q"><span>${N[i]}</span><b>${med(a).toFixed(1)}% (${Math.min(...a).toFixed(1)} to ${Math.max(...a).toFixed(1)})</b></div>`).join('')+'<div>With only 67 validation records, a few very long stays swing the mean and P95 a lot. Judge the model on the typical value, not one split.</div>'}catch(e){}}
+$('vrun').onclick=runVal;runVal();spread();
+</script>
+<script>
+const HC=[2,3,3,2,4,5,5,2,5,7,6,15,15,10,15,13,18,14,20,14,15,15,8,6];
+const HS=HC.map((_,h)=>(HC[(h+23)%24]+HC[h]+HC[(h+1)%24])/3),HM=HC.reduce((a,b)=>a+b)/24;
+const mul=h=>HS[h]/HM,P1=.05,FR=[1-P1,(1-P1)*.35,(1-P1)*.25,1-P1,P1,(1-P1)*.4];
+function ec(c,a){let s=0,t=1;for(let k=0;k<c;k++){if(k>0)t*=a/k;s+=t}const top=t*a/c*c/(c-a);return top/(s+top)}
+function model(h,o){o=o||{};const base=+$('arr').value*mul(h)*(o.arr||1);
+ const st=S.map((s,i)=>{const c=s.sv+((o.sv&&o.sv[i])||0),t=s.t*(o.t||1),lam=base*FR[i],a=lam/60*t,rho=a/c;
+  const wq=rho>=1?Infinity:ec(c,a)/(c/t-lam/60);return{n:s.n,lam,rho,wq,c}});
+ const path=st[0].wq+.35*st[1].wq+.25*st[2].wq+st[3].wq+.4*st[5].wq;
+ const bi=st.reduce((b,s,i)=>s.rho>st[b].rho?i:b,0);return{st,path,b:bi,base}}
+const fm=v=>v===Infinity?'overloaded':v<.1?'under 0.1 min':v.toFixed(1)+' min';
+const pc=v=>Math.round(v*100)+'%';
+function xai(){try{const h=+$('xh').value,m=model(h),b0=model(h,{arr:1/mul(h)}),B=m.st[m.b];
+ $('xo').innerHTML=`<div class="q"><span>Arrival level at ${String(h).padStart(2,'0')}:00</span><b>${mul(h).toFixed(1)}x daily average (${m.base.toFixed(0)} per hour)</b></div>
+ <div class="q"><span>Predicted bottleneck</span><b>${B.n} (${pc(B.rho)} busy)</b></div>
+ <div class="q"><span>Predicted queue wait, routine path</span><b>${fm(m.path)}</b></div>
+ <div class="q"><span>Predicted queue wait, P1 at ER</span><b>${fm(m.st[4].wq)}</b></div>
+ <table style="width:100%;margin-top:8px;font-size:13px">${m.st.map(s=>`<tr><td>${s.n}</td><td>${s.lam.toFixed(0)}/hr</td><td>${pc(s.rho)} busy</td><td>${fm(s.wq)}</td><td>${s.rho>=1?'Queue grows without limit':s.rho>.85?'Congested':s.rho>.7?'Busy':'Normal'}</td></tr>`).join('')}</table>`;
+ const W=b0.st[m.b];
+ $('xw').innerHTML=`<p>${B.n} is the bottleneck because arrivals reach ${B.lam.toFixed(0)} per hour while ${B.c} staff each need about ${S[m.b].t} min per patient.</p>
+ <div class="q"><span>${B.n} busy, at an average hour</span><b>${pc(W.rho)}</b></div><div class="q"><span>${B.n} busy, at ${String(h).padStart(2,'0')}:00</span><b>${pc(B.rho)}</b></div>
+ <div class="q"><span>${B.n} wait, average hour to this hour</span><b>${fm(W.wq)} to ${fm(B.wq)}</b></div>
+ <div class="mu">Main driver: the arrival rate. Staff count and service time are unchanged between the two lines, so the whole change comes from demand.</div>`;
+ const L=[['Add 1 doctor',{sv:{3:1}}],['Add 1 lab staff',{sv:{1:1}}],['Add 1 pharmacist',{sv:{5:1}}],['Add 1 ER staff',{sv:{4:1}}],['Cut service times by 10%',{t:.9}],['Reduce arrivals by 10%',{arr:.9}]].map(([n,o])=>{const r=model(h,o);return[n,r.path,r.st.filter(x=>x.rho>=1).length]});
+ L.sort((a,b)=>a[2]-b[2]||(a[1]===b[1]?0:a[1]===Infinity?1:b[1]===Infinity?-1:a[1]-b[1]));
+ $('xl').innerHTML='<div class="mu">Predicted routine-path wait if one thing changes (now: '+fm(m.path)+'):</div>'+L.map(l=>`<div class="q"><span>${l[0]}</span><b>${fm(l[1])}${l[2]?', '+l[2]+' station'+(l[2]>1?'s':'')+' still overloaded':''}</b></div>`).join('')+'<div class="mu" style="margin-top:8px">Staff needed to keep each station under 85% busy at this hour (now):</div>'+m.st.map((x,i)=>{let c=1;while(x.lam/60*S[i].t/c>=.85&&c<30)c++;return`<div class="q"><span>${x.n}</span><b>${c} (${x.c})${c>x.c?', add '+(c-x.c):''}</b></div>`}).join('');
+ const R=HS.map((_,k)=>model(k).path),mx=Math.max(...R.filter(x=>x!==Infinity),1);
+ $('xc').innerHTML=`<div class="sc" style="overflow-x:auto"><div style="display:flex;align-items:flex-end;gap:3px;height:120px;min-width:420px" role="img" aria-label="Predicted wait by hour">${R.map((v,k)=>`<div title="${String(k).padStart(2,'0')}:00 ${fm(v)}" style="flex:1;height:${v===Infinity?100:Math.max(3,v/mx*100)}%;background:${v===Infinity?'#e53935':k===h?'#f57c00':'var(--ac)'}"></div>`).join('')}</div></div><div class="mu" style="display:flex;justify-content:space-between"><span>00:00</span><span>12:00</span><span>23:00</span></div><div class="mu">Red bars: overloaded hours. Orange bar: the selected hour.</div>`}
+ catch(e){$('xo').textContent='The forecast could not be calculated. Reload the page and try again.'}}
+$('xh').innerHTML=Array.from({length:24},(_,h)=>`<option value="${h}">${String(h).padStart(2,'0')}:00</option>`).join('');
+$('xh').value=HS.indexOf(Math.max(...HS));
+['xr','xtab'].forEach(i=>$(i).addEventListener('click',xai));$('xh').onchange=xai;['doc','lab','pha','arr'].forEach(i=>$(i).addEventListener('input',xai));
+xai();
+</script>
+<script>
+document.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{spd=+b.dataset.sp;document.querySelectorAll('[data-sp]').forEach(x=>{x.setAttribute('aria-pressed',x===b);x.classList.toggle('on',x===b)});$('spl').textContent='1 real second = '+2*spd+' simulated minutes'});
+$('spl').textContent='1 real second = 2 simulated minutes';document.querySelector('[data-sp="1"]').classList.add('on');
+setInterval(()=>S.forEach(s=>s.lb&&setLabel(s.lb,s.n+' x'+s.sv+' | '+s.q.length+' waiting')),700);
+view.insertAdjacentHTML('beforeend','<div style="position:absolute;left:8px;bottom:8px;background:rgba(15,26,34,.82);color:#e6edf3;font-size:12px;padding:6px 9px;border-radius:6px;line-height:1.5">Patients: <b style="color:#ff3b3b">P1 Emergency</b> | <b style="color:#ff9800">P2 Urgent</b> | <b style="color:#ffd23f">P3 Moderate</b> | <b style="color:#3ddc7a">P4 Routine</b><br>Desks = staff (lit when serving). Floor ring: green normal, amber busy, red congested.</div>');
+(()=>{
+const PTS=[[[60,260],[180,215],[300,170]],[[60,260],[180,215],[330,120],[520,70]],[[60,260],[220,285],[480,270]]];
+const CL=PTS.map(p=>{const c=[0];for(let i=1;i<p.length;i++)c.push(c[i-1]+Math.hypot(p[i][0]-p[i-1][0],p[i][1]-p[i-1][1]));return c}),PL=CL.map(c=>c[c.length-1]);
+function at(i,f){const p=PTS[i],c=CL[i],d=f*PL[i];let k=1;while(k<c.length-1&&c[k]<d)k++;const u=(d-c[k-1])/(c[k]-c[k-1]||1);return[p[k-1][0]+(p[k][0]-p[k-1][0])*u,p[k-1][1]+(p[k][1]-p[k-1][1])*u]}
+const HO=[{n:'HealFort General (ours)',s:'HealFort',x:300,y:170,tr:1,own:1,M:{'MRI':[1,1],'Ventilator':[3,6],'Defibrillator':[4,5]}},
+ {n:'City Care Hospital',s:'City Care',x:520,y:70,tr:1.25,q:14,sv:4,t:5,M:{'CT scanner':[1,2],'MRI':[0,1],'Ventilator':[2,6],'Defibrillator':[3,4]}},
+ {n:"St Mary's Medical",s:"St Mary's",x:480,y:270,tr:1,q:5,sv:3,t:5,M:{'CT scanner':[2,2],'MRI':[1,1],'Ventilator':[4,5],'Defibrillator':[2,3]}}];
+const DP=h=>Array.from({length:24},(_,k)=>[h.x+Math.cos(k*2.4)*(26+Math.sqrt(k)*5),h.y+Math.sin(k*2.4)*(26+Math.sqrt(k)*5)*.8]),LC=['#2ecc71','#f5a623','#e53935'],LB=['Normal','Busy','Congested'];
+$('mp').innerHTML=PTS.map((p,i)=>`<polyline id="rd${i}" points="${p.map(q=>q.join(',')).join(' ')}" fill="none" stroke="#5b7083" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`).join('')
+ +'<circle cx="60" cy="260" r="9" fill="#e53935"/><text x="60" y="284" text-anchor="middle" style="fill:#e6edf3;font-size:12px">Ambulance</text>'
+ +HO.map((h,i)=>`<circle id="pr${i}" cx="${h.x}" cy="${h.y}" r="19" fill="none" stroke="#2ecc71" stroke-width="3"/><circle cx="${h.x}" cy="${h.y}" r="15" fill="#1b2a35" stroke="#4aa3ff" stroke-width="2"/><text x="${h.x}" y="${h.y+5}" text-anchor="middle" style="fill:#e6edf3;font-size:14px;font-weight:700">H</text><g id="cr${i}">${DP(h).map(q=>`<circle cx="${q[0]}" cy="${q[1]}" r="2.8" fill="#4aa3ff" opacity="0"/>`).join('')}</g><text id="nt${i}" x="${h.x}" y="${h.y+64}" text-anchor="middle" style="fill:#e6edf3;font-size:12px"></text><rect x="${h.x-40}" y="${h.y+70}" width="80" height="6" rx="3" fill="#2a3642"/><rect id="rb${i}" x="${h.x-40}" y="${h.y+70}" width="0" height="6" rx="3" fill="#2ecc71"/>`).join('')
+ +'<g id="ab" display="none"><rect width="24" height="14" rx="3" fill="#fff" stroke="#e53935" stroke-width="2"/><text x="12" y="11" text-anchor="middle" style="fill:#e53935;font-size:12px;font-weight:700">+</text></g>';
+let DS=null,NT=[],lastKey='',lastB='';const K=2.5,dm=v=>(v>=0?'+':'')+Math.round(v)+' min';
+function sc(){const need=$('mn').value;return HO.map((h,i)=>{const M=h.M;if(h.own)M['CT scanner']=[Math.max(0,S[2].sv-S[2].run.length),S[2].sv];
+ const eta=PL[i]/40*h.tr,crowd=h.own?(m=>Math.min(60,Math.max(m.st[3].wq,m.st[4].wq)))(model(0,{arr:1/mul(0)})):h.q/h.sv*h.t,av=need?M[need][0]:null,pen=need&&av===0?25:0;
+ const lv=crowd<8?0:crowd<18?1:2;return{h,i,M,eta,crowd,pen,lv,dots:Math.min(24,Math.round(crowd/2.2)),tot:eta+crowd+pen}})}
+function notify(m,bad){NT.unshift({t:new Date().toLocaleTimeString(),m,bad});NT=NT.slice(0,6);$('ml').innerHTML=NT.map(n=>`<div class="q"><span><b>${n.bad?'URGENT':'INFO'}</b> ${n.m}</span><span class="mu">${n.t}</span></div>`).join('');banner(m)}
+function refresh(){try{const a=sc(),o=a.slice().sort((x,y)=>x.tot-y.tot),b=o[0],c=o[1],tg=DS?a[DS.i]:b,mx=Math.max(...a.map(x=>x.tot),1),need=$('mn').value;
+ a.forEach(x=>{const r=$('rd'+x.i);r.setAttribute('stroke',x===tg?'#2fd0b0':'#5b7083');r.setAttribute('stroke-width',x===tg?9:5);$('nt'+x.i).textContent=x.h.s+': '+LB[x.lv]+', wait '+(x.crowd>=60?'60+':Math.round(x.crowd))+' min';const rb=$('rb'+x.i);rb.setAttribute('width',Math.min(80,x.crowd/40*80));rb.setAttribute('fill',LC[x.lv]);x.h.dn=x.dots;x.h.lv=x.lv});
+ if(lastB&&lastB!==b.h.s&&!DS)notify('Recommendation changed from '+lastB+' to '+b.h.s+' after the what-if change. HealFort ED wait is now '+(a[0].crowd>=60?'60+':Math.round(a[0].crowd))+' min.');lastB=b.h.s;
+ $('mr').innerHTML=o.map(x=>`<div style="margin:8px 0"><b>${x.h.n}</b>${x===b?' <span class="tag" style="color:#2fd0b0">Recommended</span>':''} <span class="mu">about ${Math.round(x.tot)} min to treatment | Rush: <b style="color:${LC[x.lv]}">${LB[x.lv]}</b></span>
+  <div style="display:flex;height:12px;border-radius:3px;overflow:hidden;background:#2a3642"><div style="width:${x.eta/mx*100}%;background:#4aa3ff"></div><div style="width:${x.crowd/mx*100}%;background:#f5a623"></div><div style="width:${x.pen/mx*100}%;background:#e53935"></div></div>
+  <div class="mu">Travel ${Math.round(x.eta)} min | ED queue wait ${Math.round(x.crowd)} min | Equipment penalty ${x.pen} min</div></div>`).join('')
+  +`<p>${b.h.n} is recommended: about ${Math.round(b.tot)} min to treatment against ${Math.round(c.tot)} min at ${c.h.n}. Compared with ${c.h.s}: travel ${dm(b.eta-c.eta)}, ED crowding ${dm(b.crowd-c.crowd)}${need?', equipment '+dm(b.pen-c.pen):''}.</p><div class="mu">Explainable score = travel time + ED queue wait + equipment penalty (25 min if the needed machine is unavailable). Our hospital's wait comes from the queueing model using the current what-if settings (arrivals, doctors, lab and pharmacy staff). The other two hospitals are demo data. Decision support: the paramedic decides.</div>`;
+ $('me').innerHTML=a.map(x=>`<div style="margin:6px 0"><b>${x.h.s}</b> <span class="mu">${x.h.own?'CT from live simulation, others demo':'demo data'}</span><div class="sc" style="display:flex;gap:6px;flex-wrap:wrap">${Object.entries(x.M).map(([k,v])=>`<span class="tag" style="padding:3px 8px">${k} ${v[0]}/${v[1]} ${v[0]===0?'none free':v[0]===1?'last unit':'available'}</span>`).join('')}</div></div>`).join('');
+ if(!DS)$('md').textContent='Dispatch to '+b.h.s;
+ const key=need+'|'+b.h.s;if(key!==lastKey){lastKey=key;if(need&&b.M[need][0]===0)notify(need+' is not available at '+b.h.n+'. Request one or choose another hospital.',1)}
+}catch(e){}}
+function an(){requestAnimationFrame(an);const t=performance.now();HO.forEach((h,i)=>{const cs=$('cr'+i).children,dn=h.dn||0,lv=h.lv||0,pr=$('pr'+i),B=DP(h);for(let k=0;k<24;k++){const c=cs[k],on=k<dn;c.setAttribute('opacity',on?.95:0);if(on){c.setAttribute('cx',B[k][0]+Math.sin(t/(500+k*23)+k)*(2+lv*1.5));c.setAttribute('cy',B[k][1]+Math.cos(t/(600+k*17)+k)*(2+lv*1.5));c.setAttribute('fill',LC[lv])}}pr.setAttribute('stroke',LC[lv]);pr.setAttribute('r',19+Math.sin(t/(lv==2?160:380))*(lv==2?3.5:1.5));pr.setAttribute('opacity',.55+.45*Math.sin(t/300))});if(!DS)return;const pr=Math.min(1,(simMin-DS.t0)/(DS.eta*K)),[x,y]=at(DS.i,pr),ab=$('ab');ab.setAttribute('display','');ab.setAttribute('transform','translate('+(x-12)+' '+(y-7)+')');
+ $('mc').textContent='Ambulance en route to '+DS.s+'. ETA '+Math.ceil(DS.eta*(1-pr))+' min.';
+ if(pr>=1){notify('Ambulance arrived at '+DS.s+'.');ab.setAttribute('display','none');DS=null;$('md').disabled=false;$('mc').textContent=''}}
+$('md').onclick=()=>{if(DS)return;const b=sc().sort((x,y)=>x.tot-y.tot)[0];DS={i:b.i,t0:simMin,eta:b.eta,s:b.h.s};$('md').disabled=true;
+ if(b.h.own&&!amb){reserved++;amb={t0:simMin,eta:Math.max(1,Math.round(b.eta*K)),pri:1}}
+ notify('Ambulance dispatched to '+b.h.n+'. ETA '+Math.round(b.eta)+' min. Chosen for the lowest expected time to treatment.');refresh()};
+$('mu').onclick=()=>{const m=$('mn').value;if(!m){notify('Select the machine needed first.');return}
+ const a=sc(),d=DS?a[DS.i]:a.slice().sort((x,y)=>x.tot-y.tot)[0];
+ if(d.M[m][0]>0){d.M[m][0]--;notify(m+' reserved at '+d.h.n+' for the incoming patient. '+d.M[m][0]+' left.',1)}
+ else{const alt=a.filter(x=>x!==d&&x.M[m]&&x.M[m][0]>0).sort((x,y)=>x.eta-y.eta)[0];notify(m+' is NOT available at '+d.h.n+'. '+(alt?'Nearest with one free: '+alt.h.n+', '+Math.round(alt.eta)+' min away. Consider diversion.':'None free in the network. Escalate to the duty manager.'),1)}refresh()};
+$('mn').onchange=refresh;['doc','lab','pha','arr'].forEach(i=>$(i).addEventListener('input',refresh));['rush','calm'].forEach(i=>$(i).addEventListener('click',refresh));
+setInterval(()=>HO.forEach(h=>{if(!h.own)h.q=Math.max(1,Math.min(25,h.q+Math.round(Math.random()*2-1)))}),3000);
+setInterval(refresh,1500);an();refresh();
+})();
+</script>
+</body></html>
